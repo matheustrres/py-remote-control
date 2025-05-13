@@ -2,9 +2,9 @@
 import argparse, json, time, ssl, logging, base64
 import socket
 from contextlib import closing, contextmanager
-from ipaddress import ip_interface
 import requests, websocket
 from config import cfg
+from st_manager import st
 
 # ─── consts ────────────────────────────────────────────────────────────────────
 APP = "PythonRemote"
@@ -23,25 +23,6 @@ def is_tv_online(port=8002, timeout=1.0) -> bool:
         return False
 
 
-def send_magic_packet(mac: str, repeat=5) -> None:
-    mac = mac.lower()
-
-    if len(mac) != 12 or not all(c in "0123456789abcdef" for c in mac):
-        raise ValueError("Invalid TV_MAC address")
-
-    frame = b"\xff" * 6 + (bytes.fromhex(mac) * 16)  # WoL protocol: 6 bytes 0xFF + 16x Mac
-    iface_ip = socket.gethostbyname(socket.gethostname())
-    bcast = str(ip_interface(f"{iface_ip}/24").network.broadcast_address)
-
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        for _ in range(repeat):
-            for host in (bcast, "255.255.255.255"):
-                s.sendto(frame, (host, 9))
-            time.sleep(0.5)
-    logging.info(f"Magic packet sent to {mac}")
-
-
 def wait_service(timeout=60) -> bool:
     t0 = time.time()
     while time.time() - t0 < timeout:
@@ -53,8 +34,9 @@ def wait_service(timeout=60) -> bool:
 
 # ── SmartThings Cloud — switch on/off ────────────────────────────
 def st_switch(cmd: str):
+    st.ensure_token()
     body = {"commands": [{"capability": "switch", "command": cmd}]}
-    url = f"https://api.smartthings.com/v1/devices/{cfg.ST_TV_ID}/commands"
+    url = f"{cfg.ST_API_URL}/devices/{cfg.ST_TV_ID}/commands"
     r = requests.post(url, headers={"Authorization": f"Bearer {cfg.ST_TOKEN}", "Content-Type": "application/json"}, json=body, timeout=10)
     r.raise_for_status()
     logging.info("SmartThings %s → %s", cmd, r.status_code)
@@ -154,6 +136,9 @@ def main():
     v.add_argument("dir", choices=["up", "down"])
     v.add_argument("steps", type=int, nargs="?", default=1)
 
+    tok = sub.add_parser("token", help="operações no SmartThings token")
+    tok.add_argument("action", choices=["check", "renew"])
+
     args = ap.parse_args()
 
     try:
@@ -163,7 +148,14 @@ def main():
             power_off()
         elif args.cmd == "vol":
             volume(args.dir, args.steps)
-    except Exception as e:
+        elif args.cmd == "token":
+            if args.action == "check":
+                logging.info("Checking token...")
+                st.ensure_token()
+            elif args.action == "renew":
+                st.TOKEN = ""
+                st.ensure_token()
+    except (RuntimeError, requests.exceptions.RequestException, websocket.WebSocketException, OSError) as e:
         logging.error(e)
 
 
