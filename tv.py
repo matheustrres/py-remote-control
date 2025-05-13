@@ -4,12 +4,11 @@ import socket
 from contextlib import closing, contextmanager
 import requests, websocket
 from config import cfg
-from st_manager import st
+from utils.st_client import st_client
 
 # ─── consts ────────────────────────────────────────────────────────────────────
 APP = "PythonRemote"
 APP_ENC_NAME = base64.b64encode(APP.encode()).decode()
-URL_TMPL = ["wss://{ip}:8002/api/v2/channels/samsung.remote.control", "?name={name}&deviceId={dev}{tok}"]
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 
@@ -23,23 +22,13 @@ def is_tv_online(port=8002, timeout=1.0) -> bool:
         return False
 
 
-def wait_service(timeout=60) -> bool:
+def wait_for_tv_is_online(timeout=60) -> bool:
     t0 = time.time()
     while time.time() - t0 < timeout:
         if is_tv_online(8002):
             return True
         time.sleep(1)
     return False
-
-
-# ── SmartThings Cloud — switch on/off ────────────────────────────
-def st_switch(cmd: str):
-    st.ensure_token()
-    body = {"commands": [{"capability": "switch", "command": cmd}]}
-    url = f"{cfg.ST_API_URL}/devices/{cfg.ST_TV_ID}/commands"
-    r = requests.post(url, headers={"Authorization": f"Bearer {cfg.ST_TOKEN}", "Content-Type": "application/json"}, json=body, timeout=10)
-    r.raise_for_status()
-    logging.info("SmartThings %s → %s", cmd, r.status_code)
 
 
 # ─── WebSocket helper ────────────────────────────────────────────────────────────────────
@@ -93,9 +82,8 @@ def power_on() -> None:
         logging.info("TV is already on")
         return
     # Only with SmartThings Cloud, no WoL
-    st_switch("on")
-    port = wait_service()
-    if not port:
+    st_client.switch_mode("on")
+    if not wait_for_tv_is_online():
         logging.error("SmartThings OK, but TV did not powered on")
         return
     logging.info("Power ON command sent")
@@ -113,16 +101,16 @@ def power_off() -> None:
 
 
 # ─── Volume actions ────────────────────────────────────────────────────────────────────
-def volume(direc: str, steps: int):
+def volume(direction: str, steps: int):
     if not is_tv_online(8002):
         logging.info("TV is off")
         return
     with tv_socket() as ws:
-        key = "KEY_VOLUP" if direc == "up" else "KEY_VOLDOWN"
+        key = "KEY_VOLUP" if direction == "up" else "KEY_VOLDOWN"
         for _ in range(steps):
             send_cmd(ws, key)
             time.sleep(1.2)
-        logging.info(f"Volume {direc.upper()} command sent")
+        logging.info(f"Volume {direction.upper()} command sent")
 
 
 # ─── CLI ────────────────────────────────────────────────────────────────────
@@ -151,10 +139,10 @@ def main():
         elif args.cmd == "token":
             if args.action == "check":
                 logging.info("Checking token...")
-                st.ensure_token()
+                st_client.ensure_pat()
             elif args.action == "renew":
-                st.TOKEN = ""
-                st.ensure_token()
+                st_client.TOKEN = ""
+                st_client.ensure_pat()
     except (RuntimeError, requests.exceptions.RequestException, websocket.WebSocketException, OSError) as e:
         logging.error(e)
 
