@@ -3,7 +3,7 @@ import argparse, logging, requests, websocket
 from clients.st_client import st_client
 from clients.tv_client import tv_client
 
-def main():
+def cli():
     ap = argparse.ArgumentParser()
 
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -38,4 +38,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cli()
