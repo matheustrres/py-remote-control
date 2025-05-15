@@ -1,4 +1,5 @@
-import time, logging, socket
+import time, logging, socket, functools
+from websocket import WebSocket
 from clients.ws_client import ws_client
 from clients.st_client import st_client
 from utils.config import cfg
@@ -23,7 +24,20 @@ def wait_for_tv_is_online(timeout=60) -> bool:
         time.sleep(1)
     return False
 
+
 # ─── TV ────────────────────────────────────────────────────────────────────
+def require_tv_online(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kw):
+        if not is_tv_online(8002):
+            logging.info("TV is off")
+            return
+        with ws_client.authorize_connection_to_tv() as ws:
+            return fn(self, ws, *args, **kw)
+
+    return wrapper
+
+
 class TVClient:
     def turn_tv_on(self) -> None:
         if is_tv_online(8002):
@@ -36,26 +50,29 @@ class TVClient:
             return
         logging.info("Power ON command sent")
 
-    def turn_tv_off(self) -> None:
-        if not is_tv_online(8002):
-            logging.info("TV is already off")
-            return
-        with ws_client.authorize_connection_to_tv() as ws:
-            ws_client.send_cmd(ws, "KEY_POWER", "Press")
-            time.sleep(1)
-            ws_client.send_cmd(ws, "KEY_POWER", "Release")
+    @require_tv_online
+    def turn_tv_off(self, ws: WebSocket) -> None:
+        self._send_cmd(ws, "KEY_POWER", press="Press")
+        time.sleep(1)
+        self._send_cmd(ws, "KEY_POWER", press="Release")
         logging.info("Power OFF command sent")
 
-    def volume(self, direction: str, steps: int):
-        if not is_tv_online(8002):
-            logging.info("TV is off")
-            return
-        with ws_client.authorize_connection_to_tv() as ws:
-            key = "KEY_VOLUP" if direction == "up" else "KEY_VOLDOWN"
-            for _ in range(steps):
-                ws_client.send_cmd(ws, key)
-                time.sleep(1.2)
-            logging.info(f"Volume {direction.upper()} command sent")
+    @require_tv_online
+    def volume(self, ws: WebSocket, direction: str, steps: int) -> None:
+        key = "KEY_VOLUP" if direction == "up" else "KEY_VOLDOWN"
+        for _ in range(steps):
+            self._send_cmd(ws, key)
+            time.sleep(1.2)
+        logging.info(f"Volume {direction.upper()} command sent")
+
+    @require_tv_online
+    def toggle_mute(self, ws: WebSocket) -> None:
+        self._send_cmd(ws, "KEY_MUTE", log="Mute toggled")
+
+    def _send_cmd(self, ws: WebSocket, cmd: str, *, press: str = "Click", log: str | None = None) -> None:
+        ws_client.send_cmd(ws, cmd, press)
+        if log:
+            logging.info(log)
 
 
 tv_client = TVClient()

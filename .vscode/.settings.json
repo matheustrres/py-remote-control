@@ -21,7 +21,7 @@
     "pylint.enabled": true,
     "pylint.args": [
         "--rcfile=${workspaceFolder}/.vscode/.pylintrc",
-        "--disable=C0103,C0301,C0114,C0115,C0116,C0410,R0903,W0601,W0622,W0406,W1203"
+        "--disable=E1120,C0103,C0301,C0114,C0115,C0116,C0410,R0903,W0601,W0622,W0406,W1203"
     ],
     "black-formatter.args": [
         "--line-length=200"
